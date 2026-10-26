@@ -802,7 +802,7 @@ def independent_t_section():
 
                 st.latex(
                     r"t=\frac{\bar{x}_1-\bar{x}_2}"
-                    r"\sqrt{\frac{s_1^2}{n_1}+\frac{s_2^2}{n_2}}"
+                    r"{\sqrt{\frac{s_1^2}{n_1}+\frac{s_2^2}{n_2}}}"
                 )
 
                 st.write(
