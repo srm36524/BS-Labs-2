@@ -1192,4 +1192,3 @@ st.caption(
     "Educational tool. Check statistical assumptions and "
     "interpret results in context."
 )
-```
