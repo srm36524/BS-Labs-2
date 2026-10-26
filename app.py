@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📊 Business Statistics Lab")
+st.title("📊 Business Statistics Lab 2 by SR Medaboina")
 st.caption("Step-by-step calculations for Business Statistics")
 
 
