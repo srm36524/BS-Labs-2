@@ -8,7 +8,7 @@ from scipy import stats
 # ============================================================
 
 st.set_page_config(
-    page_title="Business Statistics Lab",
+    page_title="Business Statistics Lab 2 by SR Medaboina",
     page_icon="📊",
     layout="wide"
 )
