@@ -3,21 +3,26 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 
+# ============================================================
+# PAGE CONFIGURATION
+# ============================================================
+
 st.set_page_config(
     page_title="Business Statistics Lab",
     page_icon="📊",
     layout="wide"
 )
 
-st.title("Business Statistics Lab")
-st.caption("Multiple Regression and t-Tests with Step-by-Step Calculations")
+st.title("📊 Business Statistics Lab")
+st.caption("Step-by-step calculations for Business Statistics")
 
 
 # ============================================================
-# COMMON FUNCTIONS
+# COMMON HELPER FUNCTIONS
 # ============================================================
 
 def display_table(data):
+    """Display a dataframe using Streamlit."""
     st.dataframe(
         data,
         use_container_width=True,
@@ -25,150 +30,206 @@ def display_table(data):
     )
 
 
-def parse_values(text):
-    """Convert comma-separated values into a NumPy array."""
-    values = [
-        float(value.strip())
-        for value in text.split(",")
-        if value.strip()
-    ]
+def parse_numbers(text):
+    """Convert comma-separated values into a numeric array."""
+    values = np.array(
+        [float(x.strip()) for x in text.split(",") if x.strip()],
+        dtype=float
+    )
 
-    return np.array(values, dtype=float)
+    if len(values) == 0:
+        raise ValueError("Enter at least one observation.")
+
+    if not np.all(np.isfinite(values)):
+        raise ValueError("All observations must be finite numbers.")
+
+    return values
 
 
-def show_t_test_result(
-    t_stat,
-    df,
-    alternative,
-    alpha,
-    h0,
-    h1
-):
-    """Display critical value, p-value and decision."""
+def show_t_test_result(t_stat, df, alternative):
+    """Display t-statistic, degrees of freedom and p-value."""
 
     if alternative == "Two-tailed":
         p_value = 2 * stats.t.sf(abs(t_stat), df)
-        critical = stats.t.ppf(1 - alpha / 2, df)
-
-        reject = abs(t_stat) > critical
-
-        rule = (
-            f"Reject H₀ if |t| > {critical:.4f}, "
-            f"or if p-value < {alpha}."
-        )
-
-    elif alternative == "Left-tailed":
-        p_value = stats.t.cdf(t_stat, df)
-        critical = stats.t.ppf(alpha, df)
-
-        reject = t_stat < critical
-
-        rule = (
-            f"Reject H₀ if t < {critical:.4f}, "
-            f"or if p-value < {alpha}."
-        )
-
-    else:
+    elif alternative == "Right-tailed":
         p_value = stats.t.sf(t_stat, df)
-        critical = stats.t.ppf(1 - alpha, df)
+    else:
+        p_value = stats.t.cdf(t_stat, df)
 
-        reject = t_stat > critical
+    confidence = 0.95
+    alpha = 1 - confidence
 
-        rule = (
-            f"Reject H₀ if t > {critical:.4f}, "
-            f"or if p-value < {alpha}."
-        )
+    st.subheader("Test results")
 
-    st.subheader("Hypothesis Test Decision")
+    display_table(
+        pd.DataFrame({
+            "Measure": [
+                "t-statistic",
+                "Degrees of freedom",
+                "p-value",
+                "Significance level",
+                "Critical t-value"
+            ],
+            "Value": [
+                t_stat,
+                df,
+                p_value,
+                alpha,
+                (
+                    stats.t.ppf(1 - alpha / 2, df)
+                    if alternative == "Two-tailed"
+                    else stats.t.ppf(
+                        1 - alpha if alternative == "Right-tailed"
+                        else alpha,
+                        df
+                    )
+                )
+            ]
+        }).round(6)
+    )
 
-    st.write(f"Null hypothesis: {h0}")
-    st.write(f"Alternative hypothesis: {h1}")
-    st.write(f"Degrees of freedom = {df:.4f}")
-    st.write(f"Calculated t-statistic = {t_stat:.4f}")
-    st.write(f"Critical t-value = {critical:.4f}")
-    st.write(f"p-value = {p_value:.6f}")
+    st.write(f"**Alternative hypothesis:** {alternative}")
 
-    st.write(rule)
-
-    if reject:
+    if p_value < alpha:
         st.success(
-            "Reject H₀ at the selected significance level."
+            "Reject the null hypothesis at the 5% significance level."
         )
     else:
         st.info(
-            "Fail to reject H₀ at the selected significance level."
+            "Fail to reject the null hypothesis at the 5% significance level."
         )
 
 
 # ============================================================
-# GAUSSIAN ELIMINATION
+# MULTIPLE LINEAR REGRESSION COEFFICIENT CALCULATION
 # ============================================================
 
-def gaussian_elimination_steps(matrix, rhs):
+def calculate_mlr_coefficients(data, y_col, x_cols):
+    """
+    Calculate multiple regression coefficients using centered sums.
 
-    augmented = np.column_stack(
-        [
-            matrix.astype(float),
-            rhs.astype(float)
-        ]
+    For two predictors, use the direct coefficient formulas.
+    For three predictors, use determinants (Cramer's rule).
+    """
+
+    y = data[y_col].to_numpy(dtype=float)
+    X = data[x_cols].to_numpy(dtype=float)
+
+    n = len(y)
+    k = len(x_cols)
+
+    y_mean = np.mean(y)
+    x_means = np.mean(X, axis=0)
+
+    # Deviations from means
+    Xc = X - x_means
+    yc = y - y_mean
+
+    # Centered sums of squares and cross-products
+    Sxx = Xc.T @ Xc
+    Sxy = Xc.T @ yc
+
+    if np.linalg.matrix_rank(Sxx) < k:
+        raise ValueError(
+            "The independent variables are linearly dependent. "
+            "Use a different dataset or different predictors."
+        )
+
+    coefficient_steps = []
+
+    if k == 2:
+        S11 = Sxx[0, 0]
+        S22 = Sxx[1, 1]
+        S12 = Sxx[0, 1]
+        S1y = Sxy[0]
+        S2y = Sxy[1]
+
+        denominator = S11 * S22 - S12**2
+
+        if abs(denominator) < 1e-12:
+            raise ValueError(
+                "The coefficient denominator is zero."
+            )
+
+        b1 = (
+            S1y * S22 - S2y * S12
+        ) / denominator
+
+        b2 = (
+            S2y * S11 - S1y * S12
+        ) / denominator
+
+        coefficients_x = np.array([b1, b2])
+
+        coefficient_steps.append(
+            f"S11 = {S11:.4f}, S22 = {S22:.4f}, "
+            f"S12 = {S12:.4f}"
+        )
+
+        coefficient_steps.append(
+            f"S1y = {S1y:.4f}, S2y = {S2y:.4f}"
+        )
+
+        coefficient_steps.append(
+            f"Denominator = S11 × S22 − S12² "
+            f"= {S11:.4f} × {S22:.4f} − "
+            f"({S12:.4f})² = {denominator:.4f}"
+        )
+
+        coefficient_steps.append(
+            f"b1 = (S1y × S22 − S2y × S12) / Denominator "
+            f"= ({S1y:.4f} × {S22:.4f} − "
+            f"{S2y:.4f} × {S12:.4f}) / "
+            f"{denominator:.4f} = {b1:.4f}"
+        )
+
+        coefficient_steps.append(
+            f"b2 = (S2y × S11 − S1y × S12) / Denominator "
+            f"= ({S2y:.4f} × {S11:.4f} − "
+            f"{S1y:.4f} × {S12:.4f}) / "
+            f"{denominator:.4f} = {b2:.4f}"
+        )
+
+    else:
+        # Three independent variables: Cramer's rule
+        denominator = np.linalg.det(Sxx)
+
+        if abs(denominator) < 1e-12:
+            raise ValueError(
+                "The coefficient denominator is zero."
+            )
+
+        coefficients_x = np.zeros(k)
+
+        for j in range(k):
+            replaced = Sxx.copy()
+            replaced[:, j] = Sxy
+
+            numerator = np.linalg.det(replaced)
+            coefficients_x[j] = numerator / denominator
+
+            coefficient_steps.append(
+                f"b{j + 1} = determinant of the matrix with "
+                f"column {j + 1} replaced by Sxy / determinant(Sxx) "
+                f"= {numerator:.4f} / {denominator:.4f} "
+                f"= {coefficients_x[j]:.4f}"
+            )
+
+    # Intercept
+    intercept = y_mean - np.dot(coefficients_x, x_means)
+
+    coefficients = np.concatenate(
+        ([intercept], coefficients_x)
     )
 
-    n = len(rhs)
-    notes = []
-
-    for col in range(n):
-
-        pivot = col + np.argmax(
-            np.abs(augmented[col:, col])
-        )
-
-        if abs(augmented[pivot, col]) < 1e-12:
-            raise ValueError(
-                "The equations cannot be solved uniquely. "
-                "Check whether the independent variables are "
-                "perfectly related."
-            )
-
-        if pivot != col:
-            augmented[[col, pivot]] = (
-                augmented[[pivot, col]]
-            )
-
-            notes.append(
-                f"Swap R{col + 1} and R{pivot + 1}"
-            )
-
-        pivot_value = augmented[col, col]
-
-        augmented[col] = (
-            augmented[col] / pivot_value
-        )
-
-        notes.append(
-            f"Divide R{col + 1} by {pivot_value:.6f}"
-        )
-
-        for row in range(n):
-
-            if row != col:
-
-                factor = augmented[row, col]
-
-                if abs(factor) > 1e-12:
-
-                    augmented[row] = (
-                        augmented[row]
-                        - factor * augmented[col]
-                    )
-
-                    notes.append(
-                        f"R{row + 1} - "
-                        f"({factor:.6f})R{col + 1}"
-                    )
-
-    coefficients = augmented[:, -1]
-
-    return coefficients, notes, augmented
+    return (
+        coefficients,
+        y_mean,
+        x_means,
+        Sxx,
+        Sxy,
+        coefficient_steps
+    )
 
 
 # ============================================================
@@ -180,7 +241,7 @@ def multiple_regression_section():
     st.header("Multiple Linear Regression")
 
     st.write(
-        "Calculate a regression equation with two or three "
+        "Estimate one dependent variable using two or three "
         "independent variables."
     )
 
@@ -188,102 +249,87 @@ def multiple_regression_section():
         r"\hat{Y}=a+b_1X_1+b_2X_2+\cdots+b_kX_k"
     )
 
-    st.info(
-        "The sample data can be edited, or you can upload "
-        "your own CSV file."
+    st.write(
+        "The coefficients are calculated using centered sums "
+        "and regression coefficient formulas."
     )
 
     default_data = pd.DataFrame({
-        "Sales": [50, 55, 60, 65, 70, 75, 80],
-        "Advertising": [2, 3, 4, 4, 5, 6, 7],
-        "Price": [10, 9, 8, 9, 7, 6, 5],
-        "Salespersons": [2, 2, 3, 3, 4, 4, 5]
+        "Sales": [10, 12, 13, 15, 15, 18],
+        "Advertising": [1, 2, 1, 2, 3, 3],
+        "Salespersons": [1, 1, 2, 2, 1, 2],
+        "Price": [8, 7, 8, 6, 7, 5]
     })
 
-    uploaded_file = st.file_uploader(
-        "Upload CSV file (optional)",
+    uploaded = st.file_uploader(
+        "Upload a CSV file (optional)",
         type=["csv"],
-        key="regression_upload"
+        key="mlr_upload"
     )
 
-    if uploaded_file is not None:
-
+    if uploaded is not None:
         try:
-            source_data = pd.read_csv(uploaded_file)
-
+            source = pd.read_csv(uploaded)
         except Exception as error:
-            st.error(f"Could not read CSV: {error}")
+            st.error(f"Unable to read the CSV file: {error}")
             return
-
     else:
-        source_data = default_data
+        source = default_data.copy()
 
     numeric_columns = list(
-        source_data.select_dtypes(
-            include=np.number
-        ).columns
+        source.select_dtypes(include=np.number).columns
     )
 
     if len(numeric_columns) < 3:
         st.error(
-            "The dataset must contain at least three "
-            "numeric columns."
+            "The dataset must contain at least three numeric columns."
         )
         return
 
-    dependent_variable = st.selectbox(
+    y_col = st.selectbox(
         "Select dependent variable (Y)",
         numeric_columns,
-        key="regression_y"
+        key="mlr_y"
     )
 
-    available_predictors = [
-        column
-        for column in numeric_columns
-        if column != dependent_variable
+    possible_x = [
+        col for col in numeric_columns if col != y_col
     ]
 
-    default_predictors = available_predictors[
-        :min(2, len(available_predictors))
-    ]
+    default_x = possible_x[:2]
 
-    independent_variables = st.multiselect(
+    x_cols = st.multiselect(
         "Select two or three independent variables",
-        available_predictors,
-        default=default_predictors,
-        key="regression_x"
+        possible_x,
+        default=default_x,
+        key="mlr_x"
     )
 
-    st.subheader("Enter or edit your data")
+    st.write("Edit the sample data or the uploaded data below.")
 
-    edited_data = st.data_editor(
-        source_data,
+    edited = st.data_editor(
+        source,
         num_rows="dynamic",
         use_container_width=True,
-        key="regression_editor"
+        key="mlr_data"
     )
 
     if st.button(
-        "Calculate Multiple Regression",
-        key="regression_calculate"
+        "Calculate MLR step by step",
+        type="primary",
+        key="mlr_calculate"
     ):
 
-        if len(independent_variables) not in (2, 3):
-
+        if len(x_cols) not in (2, 3):
             st.error(
                 "Select exactly two or three independent variables."
             )
             return
 
         try:
+            required = [y_col] + x_cols
 
-            required_columns = [
-                dependent_variable
-            ] + independent_variables
-
-            data = edited_data[
-                required_columns
-            ].apply(
+            data = edited[required].apply(
                 pd.to_numeric,
                 errors="coerce"
             )
@@ -293,261 +339,240 @@ def multiple_regression_section():
                 np.nan
             ).dropna()
 
-            if len(data) <= len(independent_variables) + 1:
+            n = len(data)
+            k = len(x_cols)
 
+            if n <= k + 1:
                 st.error(
-                    "Enter more complete observations. "
-                    "You need at least k + 2 observations, "
-                    "where k is the number of predictors."
+                    f"Enter at least {k + 2} complete observations."
                 )
                 return
 
-            y = data[
-                dependent_variable
-            ].to_numpy(dtype=float)
-
-            x_values = data[
-                independent_variables
-            ].to_numpy(dtype=float)
-
-            n, k = x_values.shape
-
-            # Add a column of ones for the intercept.
-            X = np.column_stack(
-                [
-                    np.ones(n),
-                    x_values
-                ]
+            (
+                coefficients,
+                y_mean,
+                x_means,
+                Sxx,
+                Sxy,
+                steps
+            ) = calculate_mlr_coefficients(
+                data,
+                y_col,
+                x_cols
             )
 
-            coefficient_names = (
-                ["Intercept"] + independent_variables
-            )
+            intercept = coefficients[0]
+            slopes = coefficients[1:]
 
-            xtx = X.T @ X
-            xty = X.T @ y
+            y = data[y_col].to_numpy(dtype=float)
+            X = data[x_cols].to_numpy(dtype=float)
 
-            if np.linalg.matrix_rank(X) < X.shape[1]:
-
-                st.error(
-                    "The predictors are perfectly or nearly "
-                    "perfectly related. Use data with independent "
-                    "variation in each predictor."
-                )
-                return
-
-            # Solve normal equations.
-            coefficients, operations, reduced_matrix = (
-                gaussian_elimination_steps(xtx, xty)
-            )
-
-            predicted = X @ coefficients
+            predicted = intercept + X @ slopes
             residuals = y - predicted
 
-            sse = float(np.sum(residuals ** 2))
+            SSE = np.sum(residuals**2)
+            SST = np.sum((y - y_mean)**2)
+            SSR = SST - SSE
 
-            sst = float(
-                np.sum((y - y.mean()) ** 2)
-            )
-
-            ssr = sst - sse
-
-            r_squared = (
-                1 - sse / sst
-                if sst > 0
+            R2 = (
+                1 - SSE / SST
+                if SST > 0
                 else np.nan
             )
 
-            adjusted_r_squared = (
-                1 - (1 - r_squared)
-                * (n - 1) / (n - k - 1)
-                if sst > 0 and n > k + 1
+            adjusted_R2 = (
+                1 - (1 - R2) * (n - 1) / (n - k - 1)
+                if np.isfinite(R2) and n > k + 1
                 else np.nan
             )
 
-            # Step 1: Data
-            st.subheader("Step 1: Data used")
+            # STEP 1: DATA
+            st.subheader("Step 1: Original data")
 
             display_table(
                 data.reset_index(drop=True).round(4)
             )
 
-            st.write(f"Number of observations, n = {n}")
-            st.write(f"Number of predictors, k = {k}")
+            st.write(f"Observations: n = {n}")
+            st.write(f"Independent variables: k = {k}")
 
-            # Step 2: Calculation columns
-            st.subheader("Step 2: Calculation table")
+            # STEP 2: MEANS
+            st.subheader("Step 2: Calculate the means")
 
-            calculation_table = data.copy()
-
-            calculation_table["Y²"] = y ** 2
-
-            for column in independent_variables:
-
-                calculation_table[
-                    f"{column}²"
-                ] = data[column] ** 2
-
-                calculation_table[
-                    f"{column} × Y"
-                ] = data[column] * data[
-                    dependent_variable
-                ]
-
-            for i in range(k):
-
-                for j in range(i + 1, k):
-
-                    column_1 = independent_variables[i]
-                    column_2 = independent_variables[j]
-
-                    calculation_table[
-                        f"{column_1} × {column_2}"
-                    ] = (
-                        data[column_1]
-                        * data[column_2]
-                    )
-
-            display_table(
-                calculation_table.round(4)
-            )
-
-            st.write("Column totals")
-
-            totals = pd.DataFrame({
-                "Column": calculation_table.columns,
-                "Total": [
-                    calculation_table[column].sum()
-                    for column in calculation_table.columns
-                ]
+            mean_table = pd.DataFrame({
+                "Variable": [y_col] + x_cols,
+                "Mean": [y_mean] + list(x_means)
             })
 
-            display_table(totals.round(4))
+            display_table(mean_table.round(4))
 
-            # Step 3: Normal equations
-            st.subheader("Step 3: Normal equations")
+            # STEP 3: DEVIATIONS AND CROSS-PRODUCTS
+            st.subheader(
+                "Step 3: Calculate deviations and cross-products"
+            )
+
+            centered = pd.DataFrame(index=data.index)
+
+            centered[f"{y_col} deviation"] = (
+                data[y_col] - y_mean
+            )
+
+            for i, col in enumerate(x_cols):
+                centered[f"{col} deviation"] = (
+                    data[col] - x_means[i]
+                )
+
+            for i, col in enumerate(x_cols):
+                centered[f"{col} deviation squared"] = (
+                    data[col] - x_means[i]
+                ) ** 2
+
+                centered[f"{col} deviation × Y deviation"] = (
+                    (data[col] - x_means[i])
+                    * (data[y_col] - y_mean)
+                )
+
+            for i in range(k):
+                for j in range(i + 1, k):
+                    centered[
+                        f"{x_cols[i]} deviation × "
+                        f"{x_cols[j]} deviation"
+                    ] = (
+                        (data[x_cols[i]] - x_means[i])
+                        * (data[x_cols[j]] - x_means[j])
+                    )
+
+            display_table(centered.reset_index(drop=True).round(4))
+
+            # STEP 4: CENTERED SUMS
+            st.subheader("Step 4: Calculate the centered sums")
 
             st.write(
-                "The coefficients are obtained from:"
+                "Sxx contains the sums of squared deviations "
+                "and cross-products among the X variables."
             )
 
             st.latex(
-                r"(X^TX)\beta=X^TY"
+                r"S_{ij}=\sum(X_i-\bar{X}_i)(X_j-\bar{X}_j)"
             )
-
-            st.write("Matrix XᵀX")
 
             display_table(
                 pd.DataFrame(
-                    xtx,
-                    index=coefficient_names,
-                    columns=coefficient_names
-                ).round(4)
+                    Sxx,
+                    index=x_cols,
+                    columns=x_cols
+                ).reset_index(names="Variable").round(4)
             )
 
-            st.write("Vector XᵀY")
+            st.write(
+                "Sxy contains the sums of products between "
+                "each X variable and Y."
+            )
 
             display_table(
-                pd.DataFrame(
-                    {"XᵀY": xty},
-                    index=coefficient_names
-                ).round(4)
+                pd.DataFrame({
+                    "Independent variable": x_cols,
+                    "Sxy": Sxy
+                }).round(4)
             )
 
-            st.write("Normal equations with numerical substitution")
-
-            for i in range(k + 1):
-
-                terms = []
-
-                for j in range(k + 1):
-
-                    terms.append(
-                        f"({xtx[i, j]:.4f})"
-                        f"({coefficient_names[j]})"
-                    )
-
-                equation = (
-                    " + ".join(terms)
-                    + f" = {xty[i]:.4f}"
-                )
-
-                st.write(equation)
-
-            # Step 4: Gaussian elimination
+            # STEP 5: COEFFICIENTS
             st.subheader(
-                "Step 4: Solve using Gaussian elimination"
+                "Step 5: Calculate the regression coefficients"
             )
 
-            with st.expander("Show row operations and final matrix"):
+            if k == 2:
 
-                for number, operation in enumerate(
-                    operations,
-                    start=1
-                ):
-
-                    st.write(
-                        f"{number}. {operation}"
-                    )
-
-                st.write("Final reduced augmented matrix")
-
-                display_table(
-                    pd.DataFrame(
-                        reduced_matrix,
-                        columns=coefficient_names + ["RHS"]
-                    ).round(6)
+                st.write(
+                    "For two independent variables, use these formulas:"
                 )
 
-            # Step 5: Regression equation
-            st.subheader("Step 5: Regression equation")
+                st.latex(
+                    r"b_1=\frac{S_{1y}S_{22}-S_{2y}S_{12}}"
+                    r"{S_{11}S_{22}-S_{12}^{2}}"
+                )
 
-            equation = (
-                f"Ŷ = {coefficients[0]:.4f}"
+                st.latex(
+                    r"b_2=\frac{S_{2y}S_{11}-S_{1y}S_{12}}"
+                    r"{S_{11}S_{22}-S_{12}^{2}}"
+                )
+
+            else:
+
+                st.write(
+                    "For three independent variables, use Cramer's "
+                    "rule on the centered normal equations."
+                )
+
+                st.latex(
+                    r"\mathbf{S}_{xx}\mathbf{b}=\mathbf{S}_{xy}"
+                )
+
+                st.latex(
+                    r"b_j=\frac{\det(\mathbf{S}_{xx}^{(j)})}"
+                    r"{\det(\mathbf{S}_{xx})}"
+                )
+
+            for step in steps:
+                st.write(step)
+
+            # INTERCEPT
+            st.write("Calculate the intercept:")
+
+            st.latex(
+                r"a=\bar{Y}-b_1\bar{X}_1-\cdots-b_k\bar{X}_k"
             )
 
-            for i, column in enumerate(
-                independent_variables,
-                start=1
-            ):
+            terms = [
+                f"{slopes[i]:.4f} × {x_means[i]:.4f}"
+                for i in range(k)
+            ]
 
-                sign = (
-                    "+"
-                    if coefficients[i] >= 0
-                    else "−"
-                )
+            st.write(
+                f"a = {y_mean:.4f} − "
+                + " − ".join(terms)
+                + f" = {intercept:.4f}"
+            )
 
+            # STEP 6: FINAL EQUATION
+            st.subheader("Step 6: Final regression equation")
+
+            equation = f"Ŷ = {intercept:.4f}"
+
+            for i, col in enumerate(x_cols):
+                sign = "+" if slopes[i] >= 0 else "−"
                 equation += (
-                    f" {sign} "
-                    f"{abs(coefficients[i]):.4f}"
-                    f"({column})"
+                    f" {sign} {abs(slopes[i]):.4f}({col})"
                 )
 
             st.success(equation)
 
             display_table(
                 pd.DataFrame({
-                    "Coefficient": coefficient_names,
-                    "Estimate": coefficients
+                    "Coefficient": (
+                        ["a"] +
+                        [f"b{i + 1}" for i in range(k)]
+                    ),
+                    "Variable": ["Intercept"] + x_cols,
+                    "Value": coefficients
                 }).round(6)
             )
 
-            # Step 6: Predictions
+            # STEP 7: PREDICTIONS
             st.subheader(
-                "Step 6: Predicted values and residuals"
+                "Step 7: Predicted values and residuals"
             )
 
             output = data.copy()
-
             output["Predicted Y"] = predicted
             output["Residual (Y − Ŷ)"] = residuals
 
             display_table(
-                output.round(4)
+                output.reset_index(drop=True).round(4)
             )
 
-            # Step 7: Goodness of fit
-            st.subheader("Step 7: Goodness of fit")
+            # STEP 8: GOODNESS OF FIT
+            st.subheader("Step 8: Goodness of fit")
 
             display_table(
                 pd.DataFrame({
@@ -559,21 +584,19 @@ def multiple_regression_section():
                         "Adjusted R²"
                     ],
                     "Value": [
-                        sse,
-                        sst,
-                        ssr,
-                        r_squared,
-                        adjusted_r_squared
+                        SSE,
+                        SST,
+                        SSR,
+                        R2,
+                        adjusted_R2
                     ]
                 }).round(6)
             )
 
-            if np.isfinite(r_squared):
-
+            if np.isfinite(R2):
                 st.write(
-                    f"The model explains approximately "
-                    f"{r_squared * 100:.2f}% of the variation "
-                    f"in {dependent_variable} in this dataset."
+                    f"The model explains {R2 * 100:.2f}% "
+                    f"of the variation in {y_col}."
                 )
 
         except (
@@ -581,10 +604,7 @@ def multiple_regression_section():
             np.linalg.LinAlgError,
             FloatingPointError
         ) as error:
-
-            st.error(
-                f"Regression calculation failed: {error}"
-            )
+            st.error(f"Calculation failed: {error}")
 
 
 # ============================================================
@@ -597,130 +617,96 @@ def one_sample_t_section():
 
     st.write(
         "Tests whether a sample mean differs from a specified "
-        "population mean when the population standard deviation "
-        "is unknown."
+        "population mean."
     )
 
-    values_text = st.text_input(
-        "Sample values, separated by commas",
-        "48, 51, 49, 52, 50, 47, 53",
-        key="one_sample_values"
+    sample_text = st.text_area(
+        "Enter sample values separated by commas",
+        value="12, 14, 15, 13, 16, 14, 15",
+        key="one_t_data"
     )
 
-    mu0 = st.number_input(
-        "Hypothesized population mean (μ₀)",
-        value=50.0,
-        key="one_sample_mu"
+    population_mean = st.number_input(
+        "Hypothesized population mean",
+        value=12.0,
+        key="one_t_mean"
     )
 
     alternative = st.selectbox(
         "Alternative hypothesis",
-        ["Two-tailed", "Left-tailed", "Right-tailed"],
-        key="one_sample_alternative"
+        ["Two-tailed", "Right-tailed", "Left-tailed"],
+        key="one_t_alternative"
     )
 
-    alpha = st.selectbox(
-        "Significance level",
-        [0.10, 0.05, 0.01],
-        index=1,
-        key="one_sample_alpha"
-    )
-
-    if st.button(
-        "Calculate One-Sample t-Test",
-        key="one_sample_calculate"
-    ):
+    if st.button("Calculate one-sample t-test"):
 
         try:
+            sample = parse_numbers(sample_text)
 
-            x = parse_values(values_text)
+            n = len(sample)
 
-            if len(x) < 2:
-
-                st.error(
-                    "Enter at least two observations."
-                )
+            if n < 2:
+                st.error("At least two observations are required.")
                 return
 
-            if not np.isfinite(x).all():
-
-                st.error(
-                    "All observations must be finite numbers."
-                )
-                return
-
-            n = len(x)
-            xbar = x.mean()
-            sd = x.std(ddof=1)
+            mean = np.mean(sample)
+            sd = np.std(sample, ddof=1)
             se = sd / np.sqrt(n)
             df = n - 1
 
-            st.subheader("Step 1: Sample data")
+            if se == 0:
+                if mean == population_mean:
+                    st.error(
+                        "The sample has zero variance and its mean "
+                        "equals the hypothesized mean; the t-statistic "
+                        "is undefined."
+                    )
+                else:
+                    st.error(
+                        "The sample has zero variance but its mean "
+                        "differs from the hypothesized mean; the "
+                        "ordinary t-statistic is undefined."
+                    )
+                return
+
+            t_stat = (mean - population_mean) / se
+
+            st.subheader("Step-by-step calculation")
 
             display_table(
                 pd.DataFrame({
-                    "Observation": np.arange(1, n + 1),
-                    "X": x
-                }).round(4)
+                    "Measure": [
+                        "Sample size (n)",
+                        "Sample mean",
+                        "Sample standard deviation",
+                        "Standard error",
+                        "Hypothesized mean",
+                        "Degrees of freedom"
+                    ],
+                    "Value": [
+                        n,
+                        mean,
+                        sd,
+                        se,
+                        population_mean,
+                        df
+                    ]
+                }).round(6)
             )
-
-            st.write(f"n = {n}")
-            st.write(f"Σx = {x.sum():.4f}")
-            st.write(f"Mean = {xbar:.4f}")
-            st.write(f"Sample SD = {sd:.4f}")
-
-            st.subheader("Step 2: Standard error")
-
-            st.write(
-                f"SE = s/√n = {sd:.4f}/√{n} = {se:.4f}"
-            )
-
-            st.subheader("Step 3: t-statistic")
 
             st.latex(
                 r"t=\frac{\bar{x}-\mu_0}{s/\sqrt{n}}"
             )
 
-            if se == 0:
-
-                st.warning(
-                    "The sample standard deviation is zero. "
-                    "The usual t-statistic is undefined."
-                )
-                return
-
-            t_stat = (xbar - mu0) / se
-
             st.write(
-                f"t = ({xbar:.4f} − {mu0:.4f})/"
-                f"{se:.4f} = {t_stat:.4f}"
+                f"t = ({mean:.4f} − {population_mean:.4f}) "
+                f"/ {se:.4f} = {t_stat:.4f}"
             )
 
-            h1 = (
-                "μ ≠ μ₀"
-                if alternative == "Two-tailed"
-                else (
-                    "μ < μ₀"
-                    if alternative == "Left-tailed"
-                    else "μ > μ₀"
-                )
-            )
+            show_t_test_result(t_stat, df, alternative)
 
-            show_t_test_result(
-                t_stat,
-                df,
-                alternative,
-                alpha,
-                "H₀: μ = μ₀",
-                f"H₁: {h1}"
-            )
-
-        except ValueError:
-
-            st.error(
-                "Invalid input. Enter numerical values "
-                "separated by commas."
-            )
+        except ValueError as error:
+            st.error(str(error))
 
 
 # ============================================================
@@ -732,140 +718,111 @@ def independent_t_section():
     st.header("Independent Two-Sample t-Test")
 
     st.write(
-        "Compares the means of two independent groups."
+        "Compare the means of two independent groups using "
+        "Welch's test or the pooled-variance t-test."
     )
 
-    col1, col2 = st.columns(2)
+    group1_text = st.text_area(
+        "Group 1 values, separated by commas",
+        value="12, 14, 15, 16, 13",
+        key="ind_t_group1"
+    )
 
-    with col1:
-
-        group1_text = st.text_area(
-            "Group 1 values, separated by commas",
-            "12, 14, 13, 15, 11",
-            key="group1_values"
-        )
-
-    with col2:
-
-        group2_text = st.text_area(
-            "Group 2 values, separated by commas",
-            "10, 9, 12, 11, 8",
-            key="group2_values"
-        )
+    group2_text = st.text_area(
+        "Group 2 values, separated by commas",
+        value="17, 18, 16, 19, 20",
+        key="ind_t_group2"
+    )
 
     method = st.radio(
-        "Choose the method",
+        "Choose the test",
         [
-            "Welch's t-test (unequal variances allowed)",
-            "Pooled-variance t-test (equal variances assumed)"
+            "Welch t-test (unequal variances)",
+            "Pooled t-test (equal variances)"
         ],
-        key="independent_method"
+        key="ind_t_method"
     )
 
     alternative = st.selectbox(
         "Alternative hypothesis",
-        ["Two-tailed", "Left-tailed", "Right-tailed"],
-        key="independent_alternative"
+        ["Two-tailed", "Right-tailed", "Left-tailed"],
+        key="ind_t_alternative"
     )
 
-    alpha = st.selectbox(
-        "Significance level",
-        [0.10, 0.05, 0.01],
-        index=1,
-        key="independent_alpha"
-    )
-
-    if st.button(
-        "Calculate Independent t-Test",
-        key="independent_calculate"
-    ):
+    if st.button("Calculate independent t-test"):
 
         try:
-
-            x1 = parse_values(group1_text)
-            x2 = parse_values(group2_text)
-
-            if len(x1) < 2 or len(x2) < 2:
-
-                st.error(
-                    "Enter at least two observations in each group."
-                )
-                return
-
-            if not (
-                np.isfinite(x1).all()
-                and np.isfinite(x2).all()
-            ):
-
-                st.error(
-                    "All observations must be finite numbers."
-                )
-                return
+            x1 = parse_numbers(group1_text)
+            x2 = parse_numbers(group2_text)
 
             n1 = len(x1)
             n2 = len(x2)
 
-            mean1 = x1.mean()
-            mean2 = x2.mean()
+            if n1 < 2 or n2 < 2:
+                st.error(
+                    "Each group must contain at least two observations."
+                )
+                return
 
-            sd1 = x1.std(ddof=1)
-            sd2 = x2.std(ddof=1)
+            mean1 = np.mean(x1)
+            mean2 = np.mean(x2)
 
-            var1 = sd1 ** 2
-            var2 = sd2 ** 2
-
-            st.subheader("Step 1: Summary statistics")
-
-            display_table(
-                pd.DataFrame({
-                    "Group": ["Group 1", "Group 2"],
-                    "n": [n1, n2],
-                    "Mean": [mean1, mean2],
-                    "Sample SD": [sd1, sd2],
-                    "Sample variance": [var1, var2]
-                }).round(4)
-            )
-
-            st.subheader("Step 2: Calculate standard error")
+            var1 = np.var(x1, ddof=1)
+            var2 = np.var(x2, ddof=1)
 
             if method.startswith("Welch"):
 
-                v1 = var1 / n1
-                v2 = var2 / n2
+                se_squared = var1 / n1 + var2 / n2
 
-                se = np.sqrt(v1 + v2)
-
-                denominator = (
-                    v1 ** 2 / (n1 - 1)
-                    + v2 ** 2 / (n2 - 1)
-                )
-
-                if denominator == 0:
-
-                    st.warning(
-                        "Both groups have zero variance. "
-                        "The usual t-statistic and Welch degrees "
-                        "of freedom cannot be calculated."
+                if se_squared == 0:
+                    st.error(
+                        "Both groups have zero variance; "
+                        "the t-statistic is undefined."
                     )
                     return
 
-                df = (v1 + v2) ** 2 / denominator
+                se = np.sqrt(se_squared)
 
-                st.write("Welch's t-test")
+                t_stat = (mean1 - mean2) / se
+
+                numerator = se_squared**2
+
+                denominator = (
+                    (var1 / n1)**2 / (n1 - 1)
+                    + (var2 / n2)**2 / (n2 - 1)
+                )
+
+                if denominator == 0:
+                    st.error("Degrees of freedom cannot be calculated.")
+                    return
+
+                df = numerator / denominator
+
+                st.subheader("Welch t-test calculation")
 
                 st.latex(
                     r"t=\frac{\bar{x}_1-\bar{x}_2}"
-                    r"{\sqrt{s_1^2/n_1+s_2^2/n_2}}"
+                    r"\sqrt{\frac{s_1^2}{n_1}+\frac{s_2^2}{n_2}}"
                 )
 
                 st.write(
-                    f"SE = √({var1:.4f}/{n1} "
-                    f"+ {var2:.4f}/{n2}) "
-                    f"= {se:.4f}"
+                    f"SE = √({var1:.4f}/{n1} + "
+                    f"{var2:.4f}/{n2}) = {se:.4f}"
                 )
 
                 st.write(
-                    f"Welch degrees of freedom = {df:.4f}"
+                    f"t = ({mean1:.4f} − {mean2:.4f}) "
+                    f"/ {se:.4f} = {t_stat:.4f}"
+                )
+
+                st.write(
+                    "Welch-Satterthwaite degrees of freedom:"
+                )
+
+                st.latex(
+                    r"df=\frac{(s_1^2/n_1+s_2^2/n_2)^2}"
+                    r"{\frac{(s_1^2/n_1)^2}{n_1-1}"
+                    r"+\frac{(s_2^2/n_2)^2}{n_2-1}}"
                 )
 
             else:
@@ -873,15 +830,26 @@ def independent_t_section():
                 df = n1 + n2 - 2
 
                 pooled_variance = (
-                    (n1 - 1) * var1
-                    + (n2 - 1) * var2
-                ) / df
-
-                se = np.sqrt(
-                    pooled_variance * (1/n1 + 1/n2)
+                    ((n1 - 1) * var1 + (n2 - 1) * var2)
+                    / df
                 )
 
-                st.write("Pooled-variance t-test")
+                se_squared = pooled_variance * (
+                    1 / n1 + 1 / n2
+                )
+
+                if se_squared == 0:
+                    st.error(
+                        "The pooled standard error is zero; "
+                        "the t-statistic is undefined."
+                    )
+                    return
+
+                se = np.sqrt(se_squared)
+
+                t_stat = (mean1 - mean2) / se
+
+                st.subheader("Pooled-variance t-test calculation")
 
                 st.latex(
                     r"s_p^2=\frac{(n_1-1)s_1^2+(n_2-1)s_2^2}"
@@ -902,63 +870,42 @@ def independent_t_section():
                     f"× (1/{n1} + 1/{n2})] = {se:.4f}"
                 )
 
-            if se == 0:
-
-                difference = mean1 - mean2
-
-                if abs(difference) < 1e-12:
-
-                    st.warning(
-                        "Both groups have zero standard error "
-                        "and identical means. The usual t-statistic "
-                        "is undefined."
-                    )
-
-                else:
-
-                    st.warning(
-                        "The standard error is zero while the "
-                        "sample means differ. The usual t-statistic "
-                        "is undefined; do not report an ordinary "
-                        "finite t-statistic."
-                    )
-
-                return
-
-            t_stat = (mean1 - mean2) / se
-
-            st.subheader("Step 3: Calculate t-statistic")
-
-            st.write(
-                f"t = ({mean1:.4f} − {mean2:.4f})/"
-                f"{se:.4f} = {t_stat:.4f}"
-            )
-
-            h1 = (
-                "μ₁ ≠ μ₂"
-                if alternative == "Two-tailed"
-                else (
-                    "μ₁ < μ₂"
-                    if alternative == "Left-tailed"
-                    else "μ₁ > μ₂"
+                st.write(
+                    f"t = ({mean1:.4f} − {mean2:.4f}) "
+                    f"/ {se:.4f} = {t_stat:.4f}"
                 )
+
+            st.subheader("Sample summary")
+
+            display_table(
+                pd.DataFrame({
+                    "Measure": [
+                        "Group 1 sample size",
+                        "Group 1 mean",
+                        "Group 1 variance",
+                        "Group 2 sample size",
+                        "Group 2 mean",
+                        "Group 2 variance",
+                        "Standard error",
+                        "Degrees of freedom"
+                    ],
+                    "Value": [
+                        n1,
+                        mean1,
+                        var1,
+                        n2,
+                        mean2,
+                        var2,
+                        se,
+                        df
+                    ]
+                }).round(6)
             )
 
-            show_t_test_result(
-                t_stat,
-                df,
-                alternative,
-                alpha,
-                "H₀: μ₁ = μ₂",
-                f"H₁: {h1}"
-            )
+            show_t_test_result(t_stat, df, alternative)
 
-        except ValueError:
-
-            st.error(
-                "Invalid input. Enter numerical values "
-                "separated by commas."
-            )
+        except ValueError as error:
+            st.error(str(error))
 
 
 # ============================================================
@@ -970,29 +917,23 @@ def paired_t_section():
     st.header("Paired-Samples t-Test")
 
     st.write(
-        "Use this test when the same people or units are "
-        "measured before and after an intervention."
+        "Compare two measurements taken from the same subjects, "
+        "such as before and after training."
     )
 
-    col1, col2 = st.columns(2)
+    before_text = st.text_area(
+        "Before values, separated by commas",
+        value="10, 12, 14, 13, 15",
+        key="paired_before"
+    )
 
-    with col1:
+    after_text = st.text_area(
+        "After values, separated by commas",
+        value="12, 13, 16, 15, 18",
+        key="paired_after"
+    )
 
-        before_text = st.text_area(
-            "Before values, separated by commas",
-            "10, 12, 9, 14, 11",
-            key="paired_before"
-        )
-
-    with col2:
-
-        after_text = st.text_area(
-            "After values, separated by commas",
-            "12, 13, 11, 15, 13",
-            key="paired_after"
-        )
-
-    direction = st.selectbox(
+    direction = st.radio(
         "Difference direction",
         ["After − Before", "Before − After"],
         key="paired_direction"
@@ -1000,168 +941,82 @@ def paired_t_section():
 
     alternative = st.selectbox(
         "Alternative hypothesis",
-        ["Two-tailed", "Left-tailed", "Right-tailed"],
+        ["Two-tailed", "Right-tailed", "Left-tailed"],
         key="paired_alternative"
     )
 
-    alpha = st.selectbox(
-        "Significance level",
-        [0.10, 0.05, 0.01],
-        index=1,
-        key="paired_alpha"
-    )
-
-    if st.button(
-        "Calculate Paired t-Test",
-        key="paired_calculate"
-    ):
+    if st.button("Calculate paired t-test"):
 
         try:
-
-            before = parse_values(before_text)
-            after = parse_values(after_text)
+            before = parse_numbers(before_text)
+            after = parse_numbers(after_text)
 
             if len(before) != len(after):
-
                 st.error(
-                    "Before and after must contain the same "
-                    "number of observations."
+                    "Before and after must have the same number "
+                    "of observations."
                 )
+                return
 
-            elif len(before) < 2:
+            n = len(before)
 
+            if n < 2:
                 st.error(
-                    "Enter at least two complete pairs."
+                    "At least two paired observations are required."
                 )
+                return
 
-            elif not (
-                np.isfinite(before).all()
-                and np.isfinite(after).all()
-            ):
-
-                st.error(
-                    "All observations must be finite numbers."
-                )
-
+            if direction == "After − Before":
+                differences = after - before
             else:
+                differences = before - after
 
-                differences = (
-                    after - before
-                    if direction == "After − Before"
-                    else before - after
+            mean_d = np.mean(differences)
+            sd_d = np.std(differences, ddof=1)
+            se = sd_d / np.sqrt(n)
+            df = n - 1
+
+            if se == 0:
+                st.error(
+                    "The differences have zero variance; "
+                    "the t-statistic is undefined."
                 )
+                return
 
-                n = len(differences)
-                mean_d = differences.mean()
-                sd_d = differences.std(ddof=1)
-                se = sd_d / np.sqrt(n)
-                df = n - 1
+            t_stat = mean_d / se
 
-                st.subheader(
-                    "Step 1: Calculate paired differences"
-                )
+            st.subheader("Step-by-step calculation")
 
-                display_table(
-                    pd.DataFrame({
-                        "Before": before,
-                        "After": after,
-                        "Difference": differences
-                    }).round(4)
-                )
-
-                st.subheader(
-                    "Step 2: Calculate mean difference"
-                )
-
-                st.write(
-                    f"Σd = {differences.sum():.4f}"
-                )
-
-                st.write(
-                    f"d̄ = Σd/n = "
-                    f"{differences.sum():.4f}/{n} "
-                    f"= {mean_d:.4f}"
-                )
-
-                st.subheader(
-                    "Step 3: Calculate SD and standard error"
-                )
-
-                st.write(
-                    f"Standard deviation of differences = "
-                    f"{sd_d:.4f}"
-                )
-
-                st.write(
-                    f"SE = s_d/√n = "
-                    f"{sd_d:.4f}/√{n} = {se:.4f}"
-                )
-
-                st.subheader(
-                    "Step 4: Calculate t-statistic"
-                )
-
-                st.latex(
-                    r"t=\frac{\bar{d}}{s_d/\sqrt{n}}"
-                )
-
-                if se == 0:
-
-                    if abs(mean_d) < 1e-12:
-
-                        st.warning(
-                            "All paired differences are zero. "
-                            "The t-statistic is undefined (0/0); "
-                            "there is no observed change."
-                        )
-
-                    else:
-
-                        st.warning(
-                            "All paired differences are identical "
-                            "and non-zero. The sample standard "
-                            "deviation is zero, so the usual "
-                            "t-statistic is undefined."
-                        )
-
-                else:
-
-                    t_stat = mean_d / se
-
-                    st.write(
-                        f"t = {mean_d:.4f}/{se:.4f} "
-                        f"= {t_stat:.4f}"
-                    )
-
-                    h1 = (
-                        "μd ≠ 0"
-                        if alternative == "Two-tailed"
-                        else (
-                            "μd < 0"
-                            if alternative == "Left-tailed"
-                            else "μd > 0"
-                        )
-                    )
-
-                    show_t_test_result(
-                        t_stat,
-                        df,
-                        alternative,
-                        alpha,
-                        "H₀: μd = 0",
-                        f"H₁: {h1}"
-                    )
-
-        except ValueError:
-
-            st.error(
-                "Invalid input. Enter valid numerical values "
-                "separated by commas."
+            display_table(
+                pd.DataFrame({
+                    "Before": before,
+                    "After": after,
+                    "Difference": differences
+                }).round(4)
             )
+
+            st.write(f"Mean difference = {mean_d:.4f}")
+            st.write(f"Standard deviation of differences = {sd_d:.4f}")
+            st.write(f"Standard error = {se:.4f}")
+            st.write(f"Degrees of freedom = {df}")
+
+            st.latex(
+                r"t=\frac{\bar{d}}{s_d/\sqrt{n}}"
+            )
+
+            st.write(
+                f"t = {mean_d:.4f} / {se:.4f} "
+                f"= {t_stat:.4f}"
+            )
+
+            show_t_test_result(t_stat, df, alternative)
+
+        except ValueError as error:
+            st.error(str(error))
 
 
 # ============================================================
-# APP NAVIGATION
+# SIDEBAR NAVIGATION
 # ============================================================
 
 page = st.sidebar.radio(
@@ -1183,12 +1038,18 @@ elif page == "One-Sample t-Test":
 elif page == "Independent Two-Sample t-Test":
     independent_t_section()
 
-else:
+elif page == "Paired-Samples t-Test":
     paired_t_section()
+
+
+# ============================================================
+# FOOTER
+# ============================================================
 
 st.divider()
 
 st.caption(
-    "Educational tool. Check statistical assumptions and "
-    "interpret results in context."
+    "Business Statistics Lab | Educational use. "
+    "Check assumptions and interpret statistical results "
+    "in the context of the problem."
 )
